@@ -1,0 +1,204 @@
+-----------------------------------------------------------------------------------------------------------------------------------------------
+Complete End to End CICD Project with jenkins on Tomcat server using ubuntu/ec2
+
+-> Launch ec2 ubuntu machine
+->install java 
+-> sudo su
+-> apt-get install default-jdk -y
+-------------------------------------------------------------------------------------------------------------------------------------
+//To set Java Path in ubuntu go to /etc/environment file and add java path 
+ -> nano /etc/environment
+ and add path -> 
+ PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/lib/jvm/java-1.11.0-open>
+ JAVA_HOME="/usr/lib/jvm/java-1.11.0-openjdk-amd64"
+ 
+ -> save and exit
+-------------------------------------------------------------------------------------------------------------------------------------
+
+-> Install ant
+-> apt-get install ant
+
+Install and configure Tomcat
+
+1.Create Tomcat User
+-> sudo useradd -m -d /opt/tomcat -U -s /bin/false tomcat 
+
+2. Download Tomcat
+-> wget https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.54/bin/apache-tomcat-9.0.54.tar.gz
+
+3. Extract file to /opt/
+-> tar xzvf apache-tomcat-9.0.54.tar.gz -C /opt/tomcat --strip-components=1 
+
+4.set the proper file permissions.
+-> chown -R tomcat:tomcat /opt/tomcat/ 
+-> chmod -R u+x /opt/tomcat/bin 
+
+5.Create Tomcat User by editing conf/tomcat-users.xml
+-> sudo nano /opt/tomcat/conf/tomcat-users.xml 
+
+Add the following values. Make sure to change the password for admin and manager access.
+
+<!-- user manager can access only manager section -->
+<role rolename="manager-gui" />
+<user username="manager" password="admin" roles="manager-gui" />
+
+<!-- user admin can access manager and admin section both -->
+<role rolename="admin-gui" />
+<user username="admin" password="admin" roles="manager-gui,admin-gui, manager-script,admin" />
+
+6. Enable Remote Tomcat Access
+-> sudo nano /opt/tomcat/webapps/manager/META-INF/context.xml
+
+-> Comment out the section added for IP address restriction to allow connections from anywhere.
+
+<Context antiResourceLocking="false" privileged="true" >
+  <CookieProcessor className="org.apache.tomcat.util.http.Rfc6265CookieProcessor"
+                   sameSiteCookies="strict" />
+  <!-- <Valve className="org.apache.catalina.valves.RemoteAddrValve"
+         allow="127\.\d+\.\d+\.\d+|::1|0:0:0:0:0:0:0:1" /> -->
+  ...
+</Context>
+
+Similarly edit context.xml for host manager application in text editor:
+
+-> sudo nano /opt/tomcat/webapps/host-manager/META-INF/context.xml
+
+-> Comment out the same section to allow connections from anywhere.
+
+<Context antiResourceLocking="false" privileged="true" >
+  <CookieProcessor className="org.apache.tomcat.util.http.Rfc6265CookieProcessor"
+                   sameSiteCookies="strict" />
+  <!--<Valve className="org.apache.catalina.valves.RemoteAddrValve"
+         allow="127\.\d+\.\d+\.\d+|::1|0:0:0:0:0:0:0:1" /> -->
+  ...
+</Context>
+
+Save all files and close it.
+
+7. Create a Tomcat Systemd Unit File
+
+-> sudo nano /etc/systemd/system/tomcat.service 
+
+[Unit]
+Description=Tomcat
+After=network.target
+
+[Service]
+Type=forking
+
+User=tomcat
+Group=tomcat
+
+Environment="JAVA_HOME=/usr/lib/jvm/java-1.11.0-openjdk-amd64"
+Environment="JAVA_OPTS=-Djava.security.egd=file:///dev/urandom"
+Environment="CATALINA_BASE=/opt/tomcat"
+Environment="CATALINA_HOME=/opt/tomcat"
+Environment="CATALINA_PID=/opt/tomcat/temp/tomcat.pid"
+Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"
+
+ExecStart=/opt/tomcat/bin/startup.sh
+ExecStop=/opt/tomcat/bin/shutdown.sh
+
+[Install]
+WantedBy=multi-user.target
+
+-> Reload the systemd daemon service to load newly create files.
+
+-> sudo systemctl daemon-reload 
+
+Now, start the Tomcat application for the first time.
+
+-> sudo systemctl start tomcat.service 
+
+Next, enable the tomcat service to auto-start for subsequent system boots. This is more important for the production deployments.
+
+-> sudo systemctl enable tomcat.service 
+
+As of now, the tomcat application is running on your system. You can verify the service status by executing the command as below. Make sure the status is showing “active (running)“.
+
+-> sudo systemctl status tomcat.service 
+
+8. Access the Tomcat Web Interface
+-> access tomcat <instance_ip>:8080
+
+
+Install jenkins.war on Tomcat
+
+-> cd /opt/tomcat/webapps
+
+-> wget https://get.jenkins.io/war-stable/2.303.2/jenkins.war
+
+-> start jenkins through tomcat
+
+-> access jenkins through <instance_ip>:8080/jenkins
+
+-> setup  jenkins without plugins
+
+Building CICD pipeline with jekins:
+
+1.Create a Job to pull code from github
+
+-> Manage jenkins -> Manage plugins -> github -> install without restart
+-> New job -> githubpull -> freestyle project -> ok
+-> source code management -> git -> copy git repo url (https://github.com/iamkeerthik/SampleWebApp.git) -> save
+-------------------------------------------------------------------------------------------------------------------------
+Optional: githubpull -> configure -> general -> advanced -> use custom workspace -> ${JENKINS_HOME}/workspace/sampleWebApp
+          // for this  you must set JENKINS_HOME path in /etc/environment
+--------------------------------------------------------------------------------------------------------------------------
+
+2.Create a job for Continous building and code review and publlish result
+
+-> Manage jenkins -> Manage plugins -> Ant & warnings-nextgen -> install without restart
+-> New job -> build and review -> freestyle project -> ok
+-> source code management -> git -> copy git repo url (https://github.com/iamkeerthik/SampleWebApp.git)
+-> build -> invoke ant (leave empty in targets  field)
+-> post build action -> record compiler warnings & static analysis_checkstle result -> checkstyle_erros.xml -> save
+
+
+3.Create a job for Continous testing and publlish Junit test reports
+
+-> Manage jenkins -> Manage plugins -> Junit test reporter -> install without restart
+-> New job -> Unit test -> freestyle project -> ok
+-> source code management -> git -> copy git repo url (https://github.com/iamkeerthik/SampleWebApp.git)
+-> build -> invoke ant (write "junit" in targets  field)
+-> post build action -> Publish junit test  result -> Test_calculator.xml(copy name from git hub repo) -> save
+
+
+4.Create a job for Continous Deployment of code to production
+
+-> Manage jenkins -> Manage plugins -> deploy to container -> install without restart
+-> New job -> deploy -> freestyle project -> ok
+-> source code management -> git -> copy git repo url (https://github.com/iamkeerthik/SampleWebApp.git)
+-> build -> invoke ant (write "war" in targets  field)
+-> post build action -> deploy war/ear to container -> **/*.war
+   -> context path -> samplewebapp (anyname)
+   -> add container -> tomcat9.x
+   -> add credentials -> jenkins-> username:admin -> password:admin -> save
+   -> select admin
+  -> add_url -> http://<instance_ip>:8080 -> save
+ 
+------------------------------------------------------------------ 
+ If you want to change tomcat port no:
+ -> go to 
+ -> nano opt/Tomcat/conf/server.xml
+ -> connect port "8090" -> save
+--------------------------------------------------------------------
+
+5.CI/CD Build Pipeline:
+
+-> install "build pipeline" plugin
+-> go to githubpull -> configure -> post build action -> build other project -> build&code review -> save
+-> go to build&code review -> configure -> post build action -> build other project -> unit test -> save
+-> go to unit test-> configure -> post build action -> build other project -> deploy -> save
+-> go to githubpull -> configure -> poll scm -> * * * * * -> save
+
+Create new view
+-> click onn + -> "Complete pipeline"(any name) -> build pipeline view -> ok
+-> select intial job -> githubpull -> ok
+
+-> go to complete pipelien view, it will show all job execution as pipeline
+
+Once deploy is succeed , open browser and check http://<instance_ip>:8080/samplewebapp
+
+---- DONE -------
+ 
